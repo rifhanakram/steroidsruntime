@@ -68,7 +68,7 @@ function ExecutableUnit(params){
                 httpMethod: req.method,
                 headers: req.headers,
                 body: req.body,
-                queryStringParameters:req.query
+                queryStringParameters:req.query ? req.query : {}
             };
 
             dispatchToLambda(eventObject,currentContext,(result) => {
