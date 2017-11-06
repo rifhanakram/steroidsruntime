@@ -2,7 +2,53 @@ var path = require('path');
 var fs = require('fs'); 
 
 
-function ExecutableUnit(params){
+function FilterManager(){
+    
+    let filterChain = [];
+    let currentIndex =-1;
+
+    function processNext(filterObj, res, callback){
+        currentIndex++;
+        if (currentIndex == filterChain.length){
+            callback(true, filterObj.chainData);
+        }else {
+            let currentItem = filterChain[currentIndex];
+            currentItem(filterObj);
+        }
+    }
+
+    function processFilter(req, res, next, chainData, callback){
+        currentIndex = -1;
+
+        let filterObj = {
+            next: ()=>{
+                processNext(filterObj, res, callback);
+            },
+            abort: (message, headers, statusCode)=>{
+                if (headers || statusCode)
+                    res.writeHead(statusCode ? statusCode : 500, headers ? headers : {});
+                
+                res.write(message);
+                res.end();
+                next();
+                callback (false);
+            },
+            chainData: chainData,
+            request: req
+        }
+
+        processNext(filterObj, res, callback);
+    }
+
+    return {
+        register: (filterFunc)=>{
+            filterChain.push(filterFunc);
+        },
+        process: processFilter
+    }
+}
+
+function ExecutableUnit(params, filterManager){
     
     let currentContext = (()=>{
         /*
@@ -63,52 +109,60 @@ function ExecutableUnit(params){
 
     return {
         handle : (req, res,next) => {
-            var eventObject = {
-                pathParameters: req.params,
-                httpMethod: req.method,
-                headers: req.headers,
-                body: req.body,
-                queryStringParameters:req.query ? req.query : {}
-            };
 
-            dispatchToLambda(eventObject,currentContext,(result) => {
-                let cObj = currentContext.steroidsGetContext();
-                let contentType = undefined;
-                if (cObj.headers){
-                    if (cObj.statusCode !== undefined)
-                        res.writeHead(parseInt(cObj.statusCode), cObj.headers);
-                    else
-                        res.writeHead(200,cObj.headers);
+            filterManager.process(req,res,next,{},(success,result)=>{
 
-                    for (let hKey in cObj.headers){
-                        let hVal = cObj.headers[hKey] === undefined ? undefined : cObj.headers[hKey].toLowerCase();
-                        switch(hKey.toLowerCase()){
-                            case "content-type":
-                                contentType = hVal;
-                                break;
+                if (!success)
+                    return;
+
+                var eventObject = {
+                    pathParameters: req.params,
+                    httpMethod: req.method,
+                    headers: req.headers,
+                    body: req.body,
+                    queryStringParameters:req.query ? req.query : {}
+                };
+
+                dispatchToLambda(eventObject,currentContext,(result) => {
+                    let cObj = currentContext.steroidsGetContext();
+                    let contentType = undefined;
+                    if (cObj.headers){
+                        if (cObj.statusCode !== undefined)
+                            res.writeHead(parseInt(cObj.statusCode), cObj.headers);
+                        else
+                            res.writeHead(200,cObj.headers);
+
+                        for (let hKey in cObj.headers){
+                            let hVal = cObj.headers[hKey] === undefined ? undefined : cObj.headers[hKey].toLowerCase();
+                            switch(hKey.toLowerCase()){
+                                case "content-type":
+                                    contentType = hVal;
+                                    break;
+                            }
                         }
+                    }else {
+                        if (cObj.statusCode !== undefined)
+                            res.writeHead(parseInt(cObj.statusCode));
+                        else
+                            res.writeHead(200);
                     }
-                }else {
-                    if (cObj.statusCode !== undefined)
-                        res.writeHead(parseInt(cObj.statusCode));
-                    else
-                        res.writeHead(200);
-                }
-                
-                if (!contentType)
-                    contentType = "application/json";
-
-                if (contentType === "application/json"){
-                    if (typeof result.body === "string")
-                        res.write(result.body);
-                    else
-                        res.write(JSON.stringify(result.body));
-                }
-                else
-                    res.write(result.body);
                     
-                res.end();
-                next();
+                    if (!contentType)
+                        contentType = "application/json";
+
+                    if (contentType === "application/json"){
+                        if (typeof result.body === "string")
+                            res.write(result.body);
+                        else
+                            res.write(JSON.stringify(result.body));
+                    }
+                    else
+                        res.write(result.body);
+                        
+                    res.end();
+                    next();
+                });
+
             });
 
         }
@@ -118,6 +172,7 @@ function ExecutableUnit(params){
 
 function MsfCore(){
     let restify = require('restify');
+    let filterManager = new FilterManager();
 
     let routes = {get:{},post:{}};
 
@@ -125,7 +180,7 @@ function MsfCore(){
         routes[method][params] =  lambda;
     }
 
-    function startRoutingEngine(){
+    function startRoutingEngine(portNumber){
         let server = restify.createServer();
         
         server.use(restify.acceptParser(server.acceptable));
@@ -139,7 +194,7 @@ function MsfCore(){
                 method: mKey
             };
 
-            let eUnit = new ExecutableUnit(inObject);
+            let eUnit = new ExecutableUnit(inObject, filterManager);
             let newPath;
             if (mParam.includes("{")){
                 let splitData = mParam.split ("/");
@@ -158,8 +213,8 @@ function MsfCore(){
         server.use(restify.acceptParser(server.acceptable));
         server.use(restify.jsonp());
         server.use(restify.bodyParser({ mapParams: false }));
-        server.listen(7777, () => {
-            console.log('%s listening at %s', server.name, server.url);
+        server.listen(portNumber ? portNumber : 7777, () => {
+            console.log('Steroids runtme is listening in', server.url);
         });
     }
 
@@ -205,7 +260,10 @@ function MsfCore(){
         loadServerless: function(){
             loadServerless();
         },
-        start: startRoutingEngine
+        start: startRoutingEngine,
+        filter: (filterFunc)=>{
+            filterManager.register(filterFunc);
+        }
     }
 }
 
