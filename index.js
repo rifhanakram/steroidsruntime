@@ -173,6 +173,7 @@ function ExecutableUnit(params, filterManager){
 function MsfCore(){
     let restify = require('restify');
     let filterManager = new FilterManager();
+    let runtimeConfig = undefined;
 
     let routes = {get:{},post:{}};
 
@@ -218,6 +219,29 @@ function MsfCore(){
         });
     }
 
+    function isAllowed(endpointKey){
+        let hasAccess = false;
+        if (runtimeConfig){
+            let endpointEffect = false;
+
+            if (runtimeConfig.security)
+                if (runtimeConfig.security.effect)
+                    endpointEffect = runtimeConfig.security.effect == "allow" ? true : false;
+
+            if (runtimeConfig.endpoints)
+            if (runtimeConfig.endpoints[endpointKey])
+            if (runtimeConfig.endpoints[endpointKey].effect)
+                endpointEffect = runtimeConfig.endpoints[endpointKey].effect == "allow" ? true : false;
+
+            if (endpointEffect)
+                hasAccess = true;
+            else
+                hasAccess = false;
+
+        }else hasAccess = true;
+        
+        return hasAccess;
+    }
 
     function loadServerless(){
         let yaml = require('js-yaml');
@@ -229,16 +253,18 @@ function MsfCore(){
             if (ymlData)
             if (ymlData.functions){
                 for(let funcKey in ymlData.functions){
-                    let funcObj = ymlData.functions[funcKey];
-                    let lambdaPath = funcObj.handler;
+                    if (isAllowed(funcKey)){
+                        let funcObj = ymlData.functions[funcKey];
+                        let lambdaPath = funcObj.handler;
 
-                    for (let i=0;i<funcObj.events.length;i++){
-                        let eObj  = funcObj.events[i];
-                        
-                        for (let eventKey in eObj){
-                            if (eventKey === "http"){
-                                let eValue = eObj[eventKey];
-                                setRoute(eValue.method, eValue.path, lambdaPath);
+                        for (let i=0;i<funcObj.events.length;i++){
+                            let eObj  = funcObj.events[i];
+                            
+                            for (let eventKey in eObj){
+                                if (eventKey === "http"){
+                                    let eValue = eObj[eventKey];
+                                    setRoute(eValue.method, eValue.path, lambdaPath);
+                                }
                             }
                         }
                     }
@@ -247,6 +273,17 @@ function MsfCore(){
 
         } catch (e) {
             console.log(e);
+        }
+    }
+
+    function loadConfiguration(filename){
+        let yaml = require('js-yaml');
+        let fs   = require('fs');
+
+        try {
+            runtimeConfig = yaml.safeLoad(fs.readFileSync(filename, 'utf8'));
+        }catch (e){
+            console.log ("Error loading steroids runtime configuration!!! ", e);
         }
     }
 
@@ -260,10 +297,11 @@ function MsfCore(){
         loadServerless: function(){
             loadServerless();
         },
-        start: startRoutingEngine,
         filter: (filterFunc)=>{
             filterManager.register(filterFunc);
-        }
+        },
+        loadConfiguration: loadConfiguration,
+        start: startRoutingEngine
     }
 }
 
