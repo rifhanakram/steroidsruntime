@@ -1,6 +1,6 @@
 {
   "name": "steroidsruntime",
-  "version": "0.1.1",
+  "version": "0.1.3",
   "description": "Steroids runtime for steroid framework",
   "main": "index.js",
   "scripts": {
