@@ -25,11 +25,14 @@ function FilterManager(){
                 processNext(filterObj, res, callback);
             },
             abort: (message, headers, statusCode)=>{
-                if (headers || statusCode)
-                    res.writeHead(statusCode ? statusCode : 500, headers ? headers : {});
-                
-                res.write(message);
-                res.end();
+                let errorCode;
+                let headerObj;
+                if (headers || statusCode) {
+                    errorCode = (statusCode ? statusCode : 500);
+                    headerObj = (headers ? headers : {});
+                }
+              
+                res.send(statusCode, message, headerObj);
                 next();
                 callback (false);
             },
