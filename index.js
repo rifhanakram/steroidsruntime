@@ -153,17 +153,39 @@ function ExecutableUnit(params, filterManager){
                     if (!contentType)
                         contentType = "application/json";
 
+                    let continueToNextResponse = true;
+
                     if (contentType === "application/json"){
                         if (typeof result.body === "string")
                             res.write(result.body);
                         else
                             res.write(JSON.stringify(result.body));
                     }
-                    else
-                        res.write(result.body);
-                        
-                    res.end();
-                    next();
+                    else {
+                        if (result.body.constructor.name =="ReadStream"){
+                            continueToNextResponse = false;
+
+                            result.body.on('data', (chunk) => {
+                                res.write(chunk);
+                            });
+
+                            result.body.once('close', ()=>{
+                                res.end();
+                                next();
+                            });
+
+                            result.body.on('error', ()=>{
+                                res.end();
+                                next();
+                            });
+                        }else 
+                            res.write(result.body);
+                    }
+
+                    if (continueToNextResponse){
+                        res.end();
+                        next();
+                    }
                 });
 
             });
@@ -179,6 +201,8 @@ function MsfCore(){
     let runtimeConfig = undefined;
 
     let routes = {get:{},post:{}};
+
+    global.EXECUTION_ENVIRONMENT = "steroidsruntime";
 
     function setRoute(method, params, lambda){
         routes[method][params] =  lambda;
