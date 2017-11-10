@@ -162,24 +162,50 @@ function ExecutableUnit(params, filterManager){
                             res.write(JSON.stringify(result.body));
                     }
                     else {
-                        if (result.body.constructor.name =="ReadStream"){
-                            continueToNextResponse = false;
+                        let respType = result.body.constructor.name;
+                        switch(respType){
+                            case "ReadStream":
+                                continueToNextResponse = false;
 
-                            result.body.on('data', (chunk) => {
-                                res.write(chunk);
-                            });
+                                result.body.on('data', (chunk) => {
+                                    res.write(chunk);
+                                });
 
-                            result.body.once('close', ()=>{
-                                res.end();
-                                next();
-                            });
+                                result.body.once('close', ()=>{
+                                    res.end();
+                                    next();
+                                });
 
-                            result.body.on('error', ()=>{
-                                res.end();
-                                next();
-                            });
-                        }else 
-                            res.write(result.body);
+                                result.body.on('error', ()=>{
+                                    res.end();
+                                    next();
+                                });
+                                break;
+                            case "PassThrough":
+                                continueToNextResponse = false;
+
+                                result.body.on('readable', function () {
+                                    let data;
+                                    while (data = this.read()) {
+                                        res.write(data);
+                                    }
+                                });
+
+                                result.body.on('finish', function (err) {
+                                    res.end();
+                                    next();
+                                });
+
+                                result.body.on('error', function() {
+                                    res.end();
+                                    next();
+                                });
+                                break;
+                            default:
+                                res.write(result.body);
+                                break;
+                        }
+
                     }
 
                     if (continueToNextResponse){
