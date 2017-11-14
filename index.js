@@ -1,6 +1,18 @@
 var path = require('path'); 
 var fs = require('fs'); 
 
+function Splash(port){
+let splashString = 
+`
+\x1b[31m   ______               _    __  
+\x1b[31m  / __/ /____ _______  (_)__/ /__
+\x1b[31m _\ \/ __/ -_) __/ _ \/ / _  (_-<
+\x1b[31m/___/\__/\__/_/  \___/_/\_,_/___/
+`;
+
+console.log(splashString);
+console.log("\x1b[32m", `Steroids Runtime loaded ${port}`);
+}
 
 function FilterManager(){
     
@@ -268,7 +280,7 @@ function MsfCore(){
         server.use(restify.jsonp());
         server.use(restify.bodyParser({ mapParams: false }));
         server.listen(portNumber ? portNumber : 7777, () => {
-            console.log('Steroids runtme is listening in', server.url);
+            Splash(server.url);
         });
     }
 
