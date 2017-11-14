@@ -11,7 +11,7 @@ let splashString =
 `;
 
 console.log(splashString);
-console.log("\x1b[32m", `Steroids Runtime loaded ${port}`);
+console.log("\x1b[32m", `Steroids Runtime loaded ${port}\n\n`,"\x1b[0m");
 }
 
 function FilterManager(){
