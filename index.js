@@ -252,7 +252,7 @@ function MsfCore() {
     let filterManager = new FilterManager();
     let runtimeConfig = undefined;
 
-    let routes = { get: {}, post: {} };
+    let routes = { get: {}, post: {}, patch: {}, delete: {} };
 
     global.EXECUTION_ENVIRONMENT = "steroidsruntime";
 
@@ -372,6 +372,12 @@ function MsfCore() {
         },
         post: (params, lambda) => {
             setRoute("post", params, lambda);
+        },
+        patch: (params, lambda) => {
+            setRoute("patch", params, lambda);
+        },
+        delete: (params, lambda) => {
+            setRoute("delete", params, lambda);
         },
         loadServerless: function () {
             loadServerless();
