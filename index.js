@@ -223,12 +223,10 @@ function ExecutableUnit(params, filterManager) {
 
                                 result.body.once('close', () => {
                                     res.end();
-                                    next();
                                 });
 
                                 result.body.on('error', () => {
                                     res.end();
-                                    next();
                                 });
                                 break;
                             case "PassThrough":
@@ -243,12 +241,10 @@ function ExecutableUnit(params, filterManager) {
 
                                 result.body.on('finish', function (err) {
                                     res.end();
-                                    next();
                                 });
 
                                 result.body.on('error', function () {
                                     res.end();
-                                    next();
                                 });
                                 break;
                             default:
@@ -260,8 +256,8 @@ function ExecutableUnit(params, filterManager) {
 
                     if (continueToNextResponse) {
                         res.end();
-                        next();
                     }
+                    next();
                 });
 
             });
