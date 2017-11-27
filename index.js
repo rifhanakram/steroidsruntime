@@ -111,29 +111,53 @@ function ExecutableUnit(params, filterManager) {
         }
     })();
 
-    function dispatchToLambda(event, context, callback) {
+    var handlerName, lFunction;
 
-        let dotIndex = params.lambda.lastIndexOf(".");
-        let handlerName = params.lambda.substring(dotIndex + 1);
-        let lambdaFileName = params.lambda.substring(0, dotIndex);
-        let fileName = lambdaFileName + ".js";
-
-        let exists = fs.existsSync(fileName);
-        if (exists) {
-            let lFunction = require("../../" + fileName);
-            let callbackFunc = (error, result) => {
-                if (!result) {
-                    if (error)
-                        result = error;
-                }
-
-                callback(result);
-            };
-            context.setCallback(callbackFunc);
-            let result = lFunction[handlerName](event, context, callbackFunc);
+    function getModule(cb){
+        
+        if (handlerName){
+            if (cb)
+                cb({success: true});
         } else {
-            callback({ success: false, message: "Lambda function doesn't exist'" });
+            let dotIndex = params.lambda.lastIndexOf(".");
+            handlerName = params.lambda.substring(dotIndex + 1);
+            let lambdaFileName = params.lambda.substring(0, dotIndex);
+            let fileName = lambdaFileName + ".js";
+    
+            fs.exists(fileName,function(exists){
+                if (exists) {
+                    lFunction = require("../../" + fileName);
+                    if (cb)
+                        cb({success: true});
+                } else {
+                    if (cb)
+                        cb({ success: false, message: "Lambda function doesn't exist'" });
+                }            
+            });
         }
+    }
+
+    getModule();
+
+    function dispatchToLambda(event, context, callback) {
+        
+        getModule(function (result){
+            let {success, message} = result;
+            if (success){
+                let callbackFunc = (error, result) => {
+                    if (!result) {
+                        if (error)
+                            result = error;
+                    }
+                    callback(result);
+                };
+                context.setCallback(callbackFunc);
+                let result = lFunction[handlerName](event, context, callbackFunc);
+            }else {
+                callback({success:false, message:message});
+            }
+        })
+        
     }
 
     return {
@@ -262,10 +286,6 @@ function MsfCore() {
 
     function startRoutingEngine(portNumber) {
         let server = restify.createServer();
-
-        server.use(restify.acceptParser(server.acceptable));
-        server.use(restify.jsonp());
-        server.use(restify.bodyParser());
 
         for (let mKey in routes)
             for (let mParam in routes[mKey]) {
