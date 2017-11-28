@@ -81,29 +81,6 @@ function FilterManager() {
 function SteroidsServiceHandler(params, filterManager) {
 
     var settings = {};
-    let currentContext = (() => {
-        var contextData = { headers: { "Content-Type": "application/json" } };
-        var callbackFunc;
-        return {
-            succeed: (successJson) => {
-                contextData = successJson;
-                if (callbackFunc)
-                    callbackFunc(successJson);
-            },
-            fail: (failJson) => {
-                contextData = failJson;
-                if (callbackFunc)
-                    callbackFunc(failJson);
-            },
-            steroidsGetContext: () => {
-                return contextData;
-            },
-            setCallback: (cb) => {
-                callbackFunc = cb;
-            }
-        }
-    })();
-
     
     (function loadLambdaFunction(cb){
         let dotIndex = params.lambda.lastIndexOf(".");
@@ -124,16 +101,40 @@ function SteroidsServiceHandler(params, filterManager) {
             cb();
     }
 
-    function dispatchToLambda(event, context, callback) {
+    function dispatchToLambda(event, callback) {
         
         getModule(function (lFunction, handlerName){
             if (lFunction && handlerName){
+
+                let context = (() => {
+                    var contextData = { headers: { "Content-Type": "application/json" } };
+                    var callbackFunc;
+                    return {
+                        succeed: (successJson) => {
+                            contextData = successJson;
+                            if (callbackFunc)
+                                callbackFunc(successJson);
+                        },
+                        fail: (failJson) => {
+                            contextData = failJson;
+                            if (callbackFunc)
+                                callbackFunc(failJson);
+                        },
+                        steroidsGetContext: () => {
+                            return contextData;
+                        },
+                        setCallback: (cb) => {
+                            callbackFunc = cb;
+                        }
+                    }
+                })();
+
                 let callbackFunc = (error, result) => {
                     if (!result) {
                         if (error)
                             result = error;
                     }
-                    callback(result);
+                    callback(result, context);
                 };
                 context.setCallback(callbackFunc);
 
@@ -162,8 +163,8 @@ function SteroidsServiceHandler(params, filterManager) {
                     queryStringParameters: req.query ? req.query : {}
                 };
 
-                dispatchToLambda(eventObject, currentContext, (result)=>{
-                    callback(result,currentContext);
+                dispatchToLambda(eventObject, (result,context)=>{
+                    callback(result,context);
                 });
             });
         }
@@ -172,6 +173,7 @@ function SteroidsServiceHandler(params, filterManager) {
 
 
 function SteroidsRuntime() {
+    //let restify = require('./runtimeserver.js');
     let restify = require('restify');
     let filterManager = new FilterManager();
     let runtimeConfig = undefined;
@@ -184,92 +186,101 @@ function SteroidsRuntime() {
         routes[method][params] = lambda;
     }
 
-    function processResponse (req,res,next, result, context) {
-        let cObj = context.steroidsGetContext();
-        let contentType = undefined;
-        if (cObj.headers) {
-            if (cObj.statusCode !== undefined)
-                res.writeHead(parseInt(cObj.statusCode), cObj.headers);
-            else
-                res.writeHead(200, cObj.headers);
+    function ResponseProcessor (req,res,next, result, context) {
 
-            for (let hKey in cObj.headers) {
-                let hVal = cObj.headers[hKey] === undefined ? undefined : cObj.headers[hKey].toLowerCase();
-                switch (hKey.toLowerCase()) {
-                    case "content-type":
-                        contentType = hVal;
-                        break;
+        function process(){
+            let cObj = context.steroidsGetContext();
+            let contentType = undefined;
+            if (cObj.headers) {
+                if (cObj.statusCode !== undefined)
+                    res.writeHead(parseInt(cObj.statusCode), cObj.headers);
+                else
+                    res.writeHead(200, cObj.headers);
+    
+                for (let hKey in cObj.headers) {
+                    let hVal = cObj.headers[hKey] === undefined ? undefined : cObj.headers[hKey].toLowerCase();
+                    switch (hKey.toLowerCase()) {
+                        case "content-type":
+                            contentType = hVal;
+                            break;
+                    }
+                }
+            } else {
+                if (cObj.statusCode !== undefined)
+                    res.writeHead(parseInt(cObj.statusCode));
+                else
+                    res.writeHead(200);
+            }
+    
+            if (!contentType)
+                contentType = "application/json";
+    
+            let continueToNextResponse = true;
+    
+            if (contentType === "application/json") {
+                if (result.body){
+                    if (typeof result.body === "string")
+                        res.write(result.body);
+                    else
+                        res.write(JSON.stringify(result.body));
                 }
             }
-        } else {
-            if (cObj.statusCode !== undefined)
-                res.writeHead(parseInt(cObj.statusCode));
-            else
-                res.writeHead(200);
-        }
-
-        if (!contentType)
-            contentType = "application/json";
-
-        let continueToNextResponse = true;
-
-        if (contentType === "application/json") {
-            if (typeof result.body === "string")
-                res.write(result.body);
-            else
-                res.write(JSON.stringify(result.body));
-        }
-        else {
-            let respType = result.body.constructor.name;
-            switch (respType) {
-                case "ReadStream":
-                    continueToNextResponse = false;
-
-                    result.body.on('data', (chunk) => {
-                        res.write(chunk);
-                    });
-
-                    result.body.once('close', () => {
-                        res.end();
-                        next();
-                    });
-
-                    result.body.on('error', () => {
-                        res.end();
-                        next();
-                    });
-                    break;
-                case "PassThrough":
-                    continueToNextResponse = false;
-
-                    result.body.on('readable', function () {
-                        let data;
-                        while (data = this.read()) {
-                            res.write(data);
-                        }
-                    });
-
-                    result.body.on('finish', function (err) {
-                        res.end();
-                        next();
-                    });
-
-                    result.body.on('error', function () {
-                        res.end();
-                        next();
-                    });
-                    break;
-                default:
-                    if (result.body)
-                        res.write(result.body);
-                    break;
+            else {
+                let respType = result.body.constructor.name;
+                switch (respType) {
+                    case "ReadStream":
+                        continueToNextResponse = false;
+    
+                        result.body.on('data', (chunk) => {
+                            res.write(chunk);
+                        });
+    
+                        result.body.once('close', () => {
+                            res.end();
+                            next();
+                        });
+    
+                        result.body.on('error', () => {
+                            res.end();
+                            next();
+                        });
+                        break;
+                    case "PassThrough":
+                        continueToNextResponse = false;
+    
+                        result.body.on('readable', function () {
+                            let data;
+                            while (data = this.read()) {
+                                res.write(data);
+                            }
+                        });
+    
+                        result.body.on('finish', function (err) {
+                            res.end();
+                            next();
+                        });
+    
+                        result.body.on('error', function () {
+                            res.end();
+                            next();
+                        });
+                        break;
+                    default:
+                        if (result.body)
+                            res.write(result.body);
+                        break;
+                }
+    
             }
-
+    
+            if (continueToNextResponse) {
+                res.end();
+                next();
+            }
         }
 
-        if (continueToNextResponse) {
-            res.end();
-            next();
+        return {
+            process: process
         }
     };
 
@@ -298,7 +309,7 @@ function SteroidsRuntime() {
 
             server[mKey](newPath, (req,res,next)=>{
                 rHandler.handle(req,res,next, (result,context)=>{
-                    processResponse(req,res,next,result,context);
+                    (new ResponseProcessor(req,res,next,result,context)).process();
                 });
             });
         }
