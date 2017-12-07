@@ -289,7 +289,6 @@ function SteroidsRuntime() {
         server.use(restify.acceptParser(server.acceptable));
         server.use(restify.jsonp());
         server.use(restify.bodyParser({ mapParams: false }));
-        server.use(restify.queryParser());
         
         for (let mKey in routes)
         for (let mParam in routes[mKey]) {
