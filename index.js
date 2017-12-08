@@ -1,7 +1,7 @@
 var path = require('path');
 var fs = require('fs');
 let yaml = require('js-yaml');
-let restify_versioning = require('restify-url-semver');
+let semver = require('semver');
 
 function Splash(port) {
     let splashString =
@@ -291,11 +291,11 @@ function SteroidsRuntime() {
 
         for (let mKey in routes)
             for (let mParam in routes[mKey]) {
-                let version = [], path = "";
+                let version = undefined, path = "";
                 let pathData = mParam.split("$");
                 path = pathData[0];
                 if (pathData[1] !== "")
-                    version.push(pathData[1]);
+                    version = [pathData[1]];
 
                 let inObject = {
                     lambda: routes[mKey][mParam],
@@ -322,7 +322,23 @@ function SteroidsRuntime() {
                 });
             }
 
-        server.pre(restify_versioning());
+        server.pre(function (req, res, next) {
+            req.originalUrl = req.url
+
+            var pieces = req.url.replace(/^\/+/, '').split('/')
+            var version = pieces[0]
+
+            version = version.replace(/v(\d{1})\.(\d{1})\.(\d{1})/, '$1.$2.$3')
+            version = version.replace(/v(\d{1})\.(\d{1})/, '$1.$2.0')
+            version = version.replace(/v(\d{1})/, '$1.0.0')
+
+            if (semver.valid(version)) {
+                req.url = req.url.replace(pieces[0], '')
+                req.headers = req.headers || []
+                req.headers['accept-version'] = version
+            } 
+            next();
+        });
 
         server.use(restify.acceptParser(server.acceptable));
         server.use(restify.jsonp());
