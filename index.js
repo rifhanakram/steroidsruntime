@@ -1,6 +1,7 @@
 var path = require('path');
 var fs = require('fs');
-let yaml = require('js-yaml');        
+let yaml = require('js-yaml');
+let semver = require('semver');
 
 function Splash(port) {
     let splashString =
@@ -81,30 +82,30 @@ function FilterManager() {
 function SteroidsServiceHandler(params, filterManager) {
 
     var settings = {};
-    
-    (function loadLambdaFunction(cb){
+
+    (function loadLambdaFunction(cb) {
         let dotIndex = params.lambda.lastIndexOf(".");
         let lambdaFileName = params.lambda.substring(0, dotIndex);
         let fileName = lambdaFileName + ".js";
 
         let exists = fs.existsSync(fileName)
-        if (exists){
+        if (exists) {
             settings.handlerName = params.lambda.substring(dotIndex + 1);
             settings.lFunction = require("../../" + fileName);
         }
     })();
 
-    function getModule(cb){
+    function getModule(cb) {
         if (settings.lFunction && settings.handlerName)
             cb(settings.lFunction, settings.handlerName);
-         else
+        else
             cb();
     }
 
     function dispatchToLambda(event, callback) {
-        
-        getModule(function (lFunction, handlerName){
-            if (lFunction && handlerName){
+
+        getModule(function (lFunction, handlerName) {
+            if (lFunction && handlerName) {
 
                 let context = (() => {
                     var contextData = { headers: { "Content-Type": "application/json" } };
@@ -140,17 +141,17 @@ function SteroidsServiceHandler(params, filterManager) {
 
                 let lambdaFunction = lFunction[handlerName];
                 lambdaFunction(event, context, callbackFunc);
-            }else {
-                callback({success:false, message:"Lambda function doesn't exist'"});
+            } else {
+                callback({ success: false, message: "Lambda function doesn't exist'" });
             }
         })
-        
+
     }
 
     return {
         handle: (req, res, next, callback) => {
             let fm = filterManager.getInstance();
-            fm.process(req, res, ()=>{}, {}, (success, result) => {
+            fm.process(req, res, () => { }, {}, (success, result) => {
 
                 if (!success)
                     return;
@@ -163,8 +164,8 @@ function SteroidsServiceHandler(params, filterManager) {
                     queryStringParameters: req.query ? req.query : {}
                 };
 
-                dispatchToLambda(eventObject, (result,context)=>{
-                    callback(result,context);
+                dispatchToLambda(eventObject, (result, context) => {
+                    callback(result, context);
                 });
             });
         }
@@ -182,13 +183,14 @@ function SteroidsRuntime() {
 
     global.EXECUTION_ENVIRONMENT = "steroidsruntime";
 
-    function setRoute(method, params, lambda) {
-        routes[method][params] = lambda;
+    function setRoute(method, path, version, lambda) {
+        version = version === undefined ? "" : version;
+        routes[method][path + "$" + version] = lambda;
     }
 
-    function ResponseProcessor (req,res,next, result, context) {
+    function ResponseProcessor(req, res, next, result, context) {
 
-        function process(){
+        function process() {
             let cObj = context.steroidsGetContext();
             let contentType = undefined;
             if (cObj.headers) {
@@ -196,7 +198,7 @@ function SteroidsRuntime() {
                     res.writeHead(parseInt(cObj.statusCode), cObj.headers);
                 else
                     res.writeHead(200, cObj.headers);
-    
+
                 for (let hKey in cObj.headers) {
                     let hVal = cObj.headers[hKey] === undefined ? undefined : cObj.headers[hKey].toLowerCase();
                     switch (hKey.toLowerCase()) {
@@ -211,14 +213,14 @@ function SteroidsRuntime() {
                 else
                     res.writeHead(200);
             }
-    
+
             if (!contentType)
                 contentType = "application/json";
-    
+
             let continueToNextResponse = true;
-    
+
             if (contentType === "application/json") {
-                if (result.body){
+                if (result.body) {
                     if (typeof result.body === "string")
                         res.write(result.body);
                     else
@@ -230,16 +232,16 @@ function SteroidsRuntime() {
                 switch (respType) {
                     case "ReadStream":
                         continueToNextResponse = false;
-    
+
                         result.body.on('data', (chunk) => {
                             res.write(chunk);
                         });
-    
+
                         result.body.once('close', () => {
                             res.end();
                             next();
                         });
-    
+
                         result.body.on('error', () => {
                             res.end();
                             next();
@@ -247,19 +249,19 @@ function SteroidsRuntime() {
                         break;
                     case "PassThrough":
                         continueToNextResponse = false;
-    
+
                         result.body.on('readable', function () {
                             let data;
                             while (data = this.read()) {
                                 res.write(data);
                             }
                         });
-    
+
                         result.body.on('finish', function (err) {
                             res.end();
                             next();
                         });
-    
+
                         result.body.on('error', function () {
                             res.end();
                             next();
@@ -270,9 +272,9 @@ function SteroidsRuntime() {
                             res.write(result.body);
                         break;
                 }
-    
+
             }
-    
+
             if (continueToNextResponse) {
                 res.end();
                 next();
@@ -286,37 +288,61 @@ function SteroidsRuntime() {
 
     function startServer(portNumber) {
         let server = restify.createServer();
+
+        for (let mKey in routes)
+            for (let mParam in routes[mKey]) {
+                let version = undefined, path = "";
+                let pathData = mParam.split("$");
+                path = pathData[0];
+                if (pathData[1] !== "")
+                    version = [pathData[1]];
+
+                let inObject = {
+                    lambda: routes[mKey][mParam],
+                    method: mKey
+                };
+
+                let rHandler = new SteroidsServiceHandler(inObject, filterManager);
+                let newPath;
+                if (path.includes("{")) {
+                    let splitData = path.split("/");
+                    newPath = "";
+                    for (let j = 0; j < splitData.length; j++) {
+                        let fItem = splitData[j];
+                        if (fItem.includes("{"))
+                            fItem = ":" + (fItem.replace("{", "").replace("}", ""));
+                        newPath += ("/" + fItem);
+                    }
+                } else newPath = path;
+
+                server[mKey]({ path: newPath, version: version }, (req, res, next) => {
+                    rHandler.handle(req, res, next, (result, context) => {
+                        (new ResponseProcessor(req, res, next, result, context)).process();
+                    });
+                });
+            }
+
+        server.pre(function (req, res, next) {
+            req.originalUrl = req.url
+
+            var pieces = req.url.replace(/^\/+/, '').split('/')
+            var version = pieces[0]
+
+            version = version.replace(/v(\d{1})\.(\d{1})\.(\d{1})/, '$1.$2.$3')
+            version = version.replace(/v(\d{1})\.(\d{1})/, '$1.$2.0')
+            version = version.replace(/v(\d{1})/, '$1.0.0')
+
+            if (semver.valid(version)) {
+                req.url = req.url.replace(pieces[0], '')
+                req.headers = req.headers || []
+                req.headers['accept-version'] = version
+            } 
+            next();
+        });
+
         server.use(restify.acceptParser(server.acceptable));
         server.use(restify.jsonp());
         server.use(restify.bodyParser({ mapParams: false }));
-        
-        for (let mKey in routes)
-        for (let mParam in routes[mKey]) {
-            let inObject = {
-                lambda: routes[mKey][mParam],
-                method: mKey
-            };
-
-            let rHandler = new SteroidsServiceHandler(inObject, filterManager);
-            let newPath;
-            if (mParam.includes("{")) {
-                let splitData = mParam.split("/");
-                newPath = "";
-                for (let j = 0; j < splitData.length; j++) {
-                    let fItem = splitData[j];
-                    if (fItem.includes("{"))
-                        fItem = ":" + (fItem.replace("{", "").replace("}", ""));
-                    newPath += ("/" + fItem);
-                }
-            } else newPath = mParam;
-
-            server[mKey](newPath, (req,res,next)=>{
-                rHandler.handle(req,res,next, (result,context)=>{
-                    (new ResponseProcessor(req,res,next,result,context)).process();
-                });
-            });
-        }
-
         server.listen(portNumber ? portNumber : 7777, () => {
             Splash(server.url);
         });
@@ -363,7 +389,7 @@ function SteroidsRuntime() {
                                 for (let eventKey in eObj) {
                                     if (eventKey === "http") {
                                         let eValue = eObj[eventKey];
-                                        setRoute(eValue.method, eValue.path, lambdaPath);
+                                        setRoute(eValue.method, eValue.path, eValue.version, lambdaPath);
                                     }
                                 }
                             }
