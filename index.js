@@ -3,7 +3,7 @@ var fs = require('fs');
 let yaml = require('js-yaml');
 let semver = require('semver');
 
-function Splash(port) {
+function Splash(port,queue) {
     let splashString =
         `
 \x1b[31m   ______               _    __  
@@ -13,7 +13,11 @@ function Splash(port) {
 `;
 
     console.log(splashString);
-    console.log("\x1b[32m", `Steroids Runtime loaded ${port}\n\n`, "\x1b[0m");
+    if (port)
+        console.log("\x1b[32m", `Steroids Runtime loaded ${port}\n\n`, "\x1b[0m");
+    
+    if (queue)
+        console.log("\x1b[32m", `Steroids Runtime listening to queues ${queue}\n\n`, "\x1b[0m");
 }
 
 function FilterManager() {
@@ -149,6 +153,16 @@ function SteroidsServiceHandler(params, filterManager) {
     }
 
     return {
+        handleInQueue: (body,headers,callback)=>{
+            var eventObject = {
+                headers: headers,
+                body: body
+            };
+
+            dispatchToLambda(eventObject, (result, context) => {
+                callback(result, context);
+            });
+        },
         handle: (req, res, next, callback) => {
             let fm = filterManager.getInstance();
             fm.process(req, res, () => { }, {}, (success, result) => {
@@ -286,9 +300,10 @@ function SteroidsRuntime() {
         }
     };
 
-    function startServer(portNumber) {
-        let server = restify.createServer();
 
+    function startHttpServer(portNumber,callback){
+        let server = restify.createServer();
+        
         for (let mKey in routes)
             for (let mParam in routes[mKey]) {
                 let version = undefined, path = "";
@@ -344,8 +359,70 @@ function SteroidsRuntime() {
         server.use(restify.jsonp());
         server.use(restify.bodyParser({ mapParams: false }));
         server.listen(portNumber ? portNumber : 7777, () => {
-            Splash(server.url);
+            if (callback)
+                callback(server.url);
         });
+    }
+
+
+    function QueueListener(subscriber,queue){
+        let inObject = {
+            lambda: queue.handler
+        };
+
+        let rHandler = new SteroidsServiceHandler(inObject);
+
+        subscriber.onMessage((body,headers)=>{
+            console.log ("Message recieved by queue : " , body)
+            rHandler.handleInQueue(body,headers,()=>{
+
+            });
+        });
+
+        subscriber.onSubscribed((queueName)=>{
+            console.log (`Subscribed to Message Queue : ${queueName}`);
+        });
+
+        subscriber.subscribe(queue.name)
+    }
+    
+    function QueueSubscriber(messageQueue, callback){
+        let subscriber = require("./queuesubscriber.js");
+        let listeners = [];
+
+        subscriber.onConnect((ipPort)=>{
+            console.log (`Connected to ActiveMQ : ${ipPort}`);
+            for (let i=0;i<messageQueue.queues.length;i++)
+                listeners.push(new QueueListener(subscriber,messageQueue.queues[i]));
+        });
+
+        subscriber.connect(messageQueue);
+    }
+
+    function subscribeToQueues(callback){
+        
+        let messageQueues = runtimeConfig.messageQueues;
+
+        for (let i=0;i<messageQueues.length;i++){
+            new QueueSubscriber(messageQueues[i],(queue)=>{
+
+            });
+        }
+    }
+
+    function startServer(portNumber) {
+        if (runtimeConfig.disableHttpServer){
+            if (runtimeConfig.messageQueues){
+                Splash(undefined, queueMessage);
+                subscribeToQueues();
+            }
+        }else {
+            startHttpServer(portNumber, (url)=>{
+                Splash(url);
+                if (runtimeConfig.messageQueues) 
+                    subscribeToQueues();
+            });
+        }       
     }
 
     function isAllowed(endpointKey) {
