@@ -303,6 +303,9 @@ function SteroidsRuntime() {
 
     function startHttpServer(portNumber,callback){
         let server = restify.createServer();
+        server.use(restify.acceptParser(server.acceptable));
+        server.use(restify.jsonp());
+        server.use(restify.bodyParser({ mapParams: false }));
         
         for (let mKey in routes)
             for (let mParam in routes[mKey]) {
@@ -355,9 +358,6 @@ function SteroidsRuntime() {
             next();
         });
 
-        server.use(restify.acceptParser(server.acceptable));
-        server.use(restify.jsonp());
-        server.use(restify.bodyParser({ mapParams: false }));
         server.listen(portNumber ? portNumber : 7777, () => {
             if (callback)
                 callback(server.url);
