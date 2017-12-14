@@ -6,11 +6,19 @@ module.exports = (function(){
     let _stompClient;
 
     function connect(settings,callback){
-        let {host,port,user,password} = settings;
+        let {host,port,user,password,tls} = settings;
         _settings.host = host;
         _settings.port = port;
-        this._stompClient = new Stomp(host, port, user, password);
+        
+        if (tls)
+            this._stompClient = new Stomp(host, port, user, password,"1.0", null,{},{});
+        else
+            this._stompClient = new Stomp(host, port, user, password);
 
+        this._stompClient.on("error", function(err){
+            console.log("STOMP ERROR : ", err);
+        });
+        
         this._stompClient.connect(function(sessionId){
             if (_settings.onConnect)
                 _settings.onConnect(sessionId);
