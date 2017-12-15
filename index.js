@@ -191,7 +191,8 @@ function SteroidsRuntime() {
     //let restify = require('./runtimeserver.js');
     let restify = require('restify');
     let filterManager = new FilterManager();
-    let runtimeConfig = undefined;
+    let runtimeConfig = {};
+    let hasRuntimeConfig = false;
 
     let routes = { get: {}, post: {}, patch: {}, delete: {}, head: {} };
 
@@ -427,7 +428,7 @@ function SteroidsRuntime() {
 
     function isAllowed(endpointKey) {
         let hasAccess = false;
-        if (runtimeConfig) {
+        if (hasRuntimeConfig) {
             let endpointEffect = false;
 
             if (runtimeConfig.security)
@@ -485,6 +486,7 @@ function SteroidsRuntime() {
 
         try {
             runtimeConfig = yaml.safeLoad(fs.readFileSync(filename, 'utf8'));
+            hasRuntimeConfig = true;
         } catch (e) {
             console.log("Error loading steroids runtime configuration!!! ", e);
         }
